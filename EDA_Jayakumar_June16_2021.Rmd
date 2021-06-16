@@ -1,0 +1,302 @@
+---
+title: "Independent Research - Epilepsy"
+author: "Sobanaa Jayakumar"
+date: "6/16/2021"
+output: html_document
+---
+
+```{r libraries}
+library(corrplot)
+library(tidyverse)
+library(imbalance)
+library(ROSE)
+library(klaR) 
+library(car)
+library(glmnet)
+library(pls)
+library(ROCR)
+library(FNN)
+library(class)
+```
+
+
+```{r data loading}
+df = read.csv("data.csv", header = T)
+head(df)
+# Dropping hashed Id column
+df <- subset(df, select = -c(X))
+df[, -179] <- scale(df[, -179])
+head(df)
+
+```
+
+
+```{r summary stats}
+#summary(df) - remove the hashtag for displaying summary stats 
+```
+
+
+```{r corrplot - NO CORRPLOT IS REQUIRED - SEE PYTHON SCRIPT}
+corr_matrix = df[,2:179]
+#corr_matrix
+M <- cor(corr_matrix)
+M
+
+```
+
+
+
+```{r NO CORRELATION OS REQUIRED - SEE PYTHON SCRIPT}
+# corr_simple <- function(data = corr_matrix,sig= 0.1){
+#   #convert data to numeric in order to run correlations
+#   #convert to factor first to keep the integrity of the data - each value will become a number rather than turn into NA
+#   df_cor <- data %>% mutate_if(is.character, as.factor)
+#   df_cor <- df_cor %>% mutate_if(is.factor, as.numeric)
+#   #run a correlation and drop the insignificant ones
+#   corr <- cor(df_cor)
+#   #prepare to drop duplicates and correlations of 1     
+#   corr[lower.tri(corr,diag=TRUE)] <- NA 
+#   #drop perfect correlations
+#   corr[corr == 1] <- NA 
+#   #turn into a 3-column table
+#   corr <- as.data.frame(as.table(corr))
+#   #remove the NA values from above 
+#   corr <- na.omit(corr) 
+#   #select significant values  
+#   corr <- subset(corr, abs(Freq) > sig) 
+#   #sort by highest correlation
+#   corr <- corr[order(-abs(corr$Freq)),] 
+#   #print table
+#   print(corr)
+#   #turn corr back into matrix in order to plot with corrplot
+#   mtx_corr <- reshape2::acast(corr, Var1~Var2, value.var="Freq")
+#   
+#   #plot correlations visually
+#   #corrplot(mtx_corr, is.corr=FALSE, tl.col="black", na.label=" ")
+# }
+# corr_simple()
+
+
+```
+
+
+```{r Data Pre Preprocessing and Splitting}
+# Conversion to binary
+class(df$y)
+df$y <- as.numeric(df$y)
+class(df$y)
+df <-  df %>% mutate(y = ifelse(y  < 2, 1, 0))
+#df <- lapply(df,as.numeric)
+df$y <- as.factor(df$y)
+class(df$y)
+head(df)
+```
+
+
+```{r Prevalence calculation}
+#Prevalence calculation
+#It is defined as the the percentage of samples belonging to the positive class. This means that, in our case, the prevalence value will depict the percentage of patients experiencing seizure. 
+
+class(df$y)
+y<-as.integer(df$y)
+y<-y-1
+sum(y)
+length(y)
+
+prevalence_calc<-function(df,y){
+  y<-as.integer(df$y)
+  y<-y-1
+  sum(y)
+  length(y)
+  X = sum(y)/length(y)
+  return(X)
+
+}
+prevalence_calc(df, y)
+
+#Separating response from independent variables
+
+input_df<-subset(df, select=X1:X178)
+input_df <- scale(input_df)
+head(input_df)
+output_df<-subset(df, select = y)
+head(output_df)
+
+#Random shuffling of the original data
+set.seed(1)
+rows<-sample(nrow(df))
+df_shuffled<-df[rows,]
+df_shuffled
+
+
+#Splitting data into train,test and validation
+
+spec = c(train = .7, test = .15, validate = .15)
+
+g = sample(cut(
+  seq(nrow(df_shuffled)), 
+  nrow(df_shuffled)*cumsum(c(0,spec)),
+  labels = names(spec)
+))
+
+res = split(df_shuffled, g)
+sapply(res, nrow)/nrow(df_shuffled)
+# res$train
+# res$test
+# res$validate
+
+prevalence_calc(res$train, y)
+prevalence_calc(res$test, y)
+prevalence_calc(res$validate, y)
+
+#Encountering class imbalance issue
+
+#oversampling in training data
+#library ROSE and imbalance
+#res$train[1:178] <- lapply(res$train[1:178], as.numeric)
+train<-res$train
+table(train$y)
+prop.table(table(train$y))
+n_legit<-6452
+new_frac_legit<-0.50
+new_n_total<- n_legit/new_frac_legit
+
+oversampling_train_result<-ovun.sample(y~., data = train, method = "over", N = new_n_total, seed = 2018)
+oversampled_train<-oversampling_train_result$data
+table(oversampled_train$y)
+prevalence_calc(oversampled_train,y)
+dim(oversampled_train)
+
+#Oversampling in test data
+test<-res$test
+table(test$y)
+prop.table(table(test$y))
+n_legit<-1348
+new_frac_legit<-0.50
+new_n_total<- n_legit/new_frac_legit
+
+oversampling_test_result<-ovun.sample(y~., data = test, method = "over", N = new_n_total, seed = 2018)
+oversampled_test<-oversampling_test_result$data
+table(oversampled_test$y)
+prevalence_calc(oversampled_test,y)
+dim(oversampled_test)
+
+
+#Oversampling in validate data
+
+validate<-res$validate
+table(validate$y)
+prop.table(table(validate$y))
+n_legit<-1400
+new_frac_legit<-0.50
+new_n_total<- n_legit/new_frac_legit
+
+oversampling_validate_result<-ovun.sample(y~., data = validate, method = "over", N = new_n_total, seed = 2018)
+oversampled_validate<-oversampling_validate_result$data
+table(oversampled_validate$y)
+prevalence_calc(oversampled_validate,y)
+dim(oversampled_validate)
+
+```
+
+We'll have to segregate train into x_train and y_train and like this for other sets too i.e. test and validate. Post splitting, we need to standardize our feature inputs for removing high variance in data. ONce this is done, we're ready to deploy our classification algos. 
+
+Multicollinearity: We cant remove features! There's no point checking since no frame readings can be removed.  
+
+```{r train test and validate}
+dim(oversampled_train)
+table(oversampled_train$y)
+dim(oversampled_test)
+table(oversampled_test$y)
+dim(oversampled_validate)
+table(oversampled_validate$y)
+```
+
+
+
+```{r logistic regression}
+#glm on train data
+epi.fit.train <- glm(y ~ ., family = binomial(link =  "logit"), data = oversampled_train)
+#predicting prob with test data
+epi.probs.test <- predict(epi.fit.train, oversampled_test, type = "response")
+head(epi.probs.test)
+thresh <- 0.5
+#converting prob to classification with 0.5 threshold
+epi.pred.test <- ifelse(epi.probs.test > thresh, 1, 0)
+#Cross tab predicted Vs Actual
+conf.mat <- table("Predicted" = epi.pred.test, "Actual" = oversampled_test$y)
+colnames(conf.mat) <- c("No", "Yes")
+rownames(conf.mat) <- c("No", "Yes")
+conf.mat
+
+#Fit Statistics
+TruN <- conf.mat[1,1]
+TruP <- conf.mat[2,2]
+FalN <- conf.mat[1,2]
+FalP <- conf.mat[2,1]
+TotN <- TruN + FalP
+TotP <- TruP + FalN
+Tot <- TotN + TotP
+Tot
+Accuracy.Rate <- (TruN + TruP) / Tot
+Error.Rate <- (FalN + FalP)/ Tot
+Sensitivity <- TruP / TotP
+Specificity <- TruN / TotN
+FalsePositive.Rate <- 1-Specificity
+Rates.50 <- c(Accuracy.Rate, Error.Rate, Sensitivity, Specificity, FalsePositive.Rate)
+names(Rates.50) <- c("Accuracy Rate", "Error Rate", "Sensitivity", "Specificity", "False Positive Rate")
+print(Rates.50, digits =2)
+#Library ROCR for ROC and AUC
+
+#Creating a prediction object
+prediction <- prediction(epi.probs.test, oversampled_test$y)
+#ROC
+performance <- performance(prediction, "tpr", "fpr")
+plot(performance, colorize = T)
+#AUC
+auc <- performance(prediction, "auc")
+auc.name <- auc@y.name[[1]]
+auc.value <- round(auc@y.values[[1]], digits = 3)
+paste(auc.name, "is", auc.value)
+```
+
+```{r KNN}
+#using library FNN and class
+#splitting by dep and indep variable for knn
+as.data.frame(oversampled_test_input)
+as.data.frame(oversampled_train_input)
+oversampled_train_input <- oversampled_train[, -179]
+oversampled_train_output <- oversampled_train[, 179]
+oversampled_test_input <- oversampled_test[, -179]
+oversampled_test_output <- oversampled_test[, 179]
+#KNN
+#Error - x must be convereted to dataframe
+epi.knn <- knn.reg(oversampled_train_input, oversampled_test_input,oversampled_train_output, k = 3)
+(mean((epi.knn$pred - oversampled_test_output)^2))^0.5
+```
+
+
+
+```{r assumptions - Multicollinearity}
+#using library kLaR and car
+cond.index(glm.fit, data = df)
+vif(glm.fit,  data = df)
+```
+
+```{r Ridge regression}
+x <- model.matrix(y ~ . -X, data = df)[,-1]
+y <- df$y
+ridge <- glmnet(x, y, alpha = 0, family = "binomial")
+plot(ridge)
+print(ridge)
+coef(ridge)
+```
+
+```{r PCA - we dont have to use this}
+pcr <- pcr(y ~ .-X, data = df, scale = T)
+?pcr
+summary(pcr)
+validationplot(pcr, val.type = "RMSEP")
+```
+
+
