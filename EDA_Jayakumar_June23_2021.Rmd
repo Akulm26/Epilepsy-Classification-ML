@@ -19,6 +19,7 @@ library(FNN)
 library(class)
 library(tree)
 library(randomForest)
+library(sgd)
 ```
 
 
@@ -270,10 +271,13 @@ oversampled_train_input <- oversampled_train[, -179]
 oversampled_train_output <- oversampled_train[, 179]
 oversampled_test_input <- oversampled_test[, -179]
 oversampled_test_output <- oversampled_test[, 179]
+oversampled_validate_input <- oversampled_validate[, -179]
+oversampled_validate_output <- oversampled_validate[, 179]
+
 #KNN
-#Error - x must be convereted to dataframe
-epi.knn <- knn.reg(oversampled_train_input, oversampled_test_input,oversampled_train_output, k = 3)
-(mean((epi.knn$pred - oversampled_test_output)^2))^0.5
+#Error - x must be converted to dataframe
+epi.knn <- knn.reg(oversampled_train_input, oversampled_validate_input, oversampled_train_output, k = 3)
+(mean((epi.knn$pred - oversampled_validate_output)^2))^0.5
 ```
 ```{r Decision trees}
 #library tree 
@@ -281,7 +285,6 @@ epi.tree.train <- tree(y ~ ., data = oversampled_train)
 epi.tree.pred.class <- predict(epi.tree.train, oversampled_validate, type = "class") #class = vector for probability
 confmat <- table(epi.tree.pred.class, oversampled_validate$y)
 confmat
-
 
 #Fit statistics
 TruN <- confmat[1,1]
@@ -303,9 +306,11 @@ print(Tree.Rates.50, digits =2)
 #Tree plot
 plot(epi.tree.train)
 text(epi.tree.train, pretty=0)
-#ROC and AUC - wow AUC is 92.9%!!!
-epi.tree.pred.prob <- predict(epi.tree.train, oversampled_test)
-pred <- prediction(epi.tree.pred.prob[, 2], oversampled_test$y)
+#ROC and AUC - wow AUC is 95.4%!!!
+epi.tree.pred.prob <- predict(epi.tree.train, oversampled_validate)
+head(epi.tree.pred.prob)
+pred <- prediction(epi.tree.pred.prob[, 2], oversampled_validate$y)
+epi.tree.pred.prob
 perf <- performance(pred, "tpr", "fpr")
 plot(perf, colorize = T)
 auc <- performance(pred, "auc")
@@ -325,9 +330,40 @@ plot(bag.epi.train)
 bag.epi.train
 varImpPlot(bag.epi.train)
 importance(bag.epi.train)
-bag.pred <- predict(bag.epi.train, oversampled_validate)
-mean((bag.pred - oversampled_validatet$y)^2)
 
+
+bag.tree.pred.class <- predict(bag.epi.train, oversampled_validate, type = "class") #class = vector for probability
+confmat <- table(bag.tree.pred.class, oversampled_validate$y)
+confmat
+
+#Fit statistics
+TruN <- confmat[1,1]
+TruP <- confmat[2,2]
+FalN <- confmat[1,2]
+FalP <- confmat[2,1]
+TotN <- TruN + FalP
+TotP <- TruP + FalN
+Tot <- TotN + TotP
+Tot
+Accuracy.Rate <- (TruN + TruP) / Tot
+Error.Rate <- (FalN + FalP)/ Tot
+Sensitivity <- TruP / TotP
+Specificity <- TruN / TotN
+FalsePositive.Rate <- 1-Specificity
+Tree.Bag.Rates.50 <- c(Accuracy.Rate, Error.Rate, Sensitivity, Specificity, FalsePositive.Rate)
+names(Tree.Bag.Rates.50) <- c("Accuracy Rate", "Error Rate", "Sensitivity", "Specificity", "False Positive Rate")
+print(Tree.Bag.Rates.50, digits =2)
+
+#ROC and AUC 
+epi.bag.pred.prob <- predict(bag.epi.train, oversampled_validate, head = "prob")
+pred <- prediction(epi.bag.pred.prob[,2], oversampled_validate$y) 
+class(oversampled_validate$y)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize = T)
+auc <- performance(pred, "auc")
+auc.name <- auc@y.name[[1]]
+auc.value <- round(auc@y.values[[1]], digits = 3)
+paste(auc.name, auc.value)
 ```
 
 
@@ -340,10 +376,60 @@ plot(rf.epi.train)
 rf.epi.train
 varImpPlot(rf.epi.train)
 importance(rf.epi.train)
-rf.pred <- predict(rf.epi.train, oversampled_validate)
-mean((rf.pred - oversampled_validate$y)^2)
-```
 
+
+rf.tree.pred.class <- predict(rf.epi.train, oversampled_validate, type = "class") #class = vector for probability
+confmat <- table(rf.tree.pred.class, oversampled_validate$y)
+confmat
+
+#Fit statistics
+TruN <- confmat[1,1]
+TruP <- confmat[2,2]
+FalN <- confmat[1,2]
+FalP <- confmat[2,1]
+TotN <- TruN + FalP
+TotP <- TruP + FalN
+Tot <- TotN + TotP
+Tot
+Accuracy.Rate <- (TruN + TruP) / Tot
+Error.Rate <- (FalN + FalP)/ Tot
+Sensitivity <- TruP / TotP
+Specificity <- TruN / TotN
+FalsePositive.Rate <- 1-Specificity
+Tree.rf.Rates.50 <- c(Accuracy.Rate, Error.Rate, Sensitivity, Specificity, FalsePositive.Rate)
+names(Tree.rf.Rates.50) <- c("Accuracy Rate", "Error Rate", "Sensitivity", "Specificity", "False Positive Rate")
+print(Tree.rf.Rates.50, digits =2)
+
+#ROC and AUC 
+epi.rf.pred.prob <- predict(rf.epi.train, oversampled_validate, type = "prob")
+pred <- prediction(epi.rf.pred.prob[,2], oversampled_validate$y) 
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize = T)
+auc <- performance(pred, "auc")
+auc.name <- auc@y.name[[1]]
+auc.value <- round(auc@y.values[[1]], digits = 3)
+paste(auc.name, auc.value)
+```
+`
+
+``
+```{r SGD}
+#using library sgd. Figuring this out!!
+# Dimensions
+dim(df)
+N <- 11500  
+d <- 179  
+
+# Generate data.
+X <- matrix(rnorm(N*d), ncol=d)
+theta <- rep(5, d+1)
+eps <- rnorm(N)
+y <- cbind(1, X) %*% theta + eps
+dat <- data.frame(y=y, x=X)
+
+sgd.theta <- sgd(y ~ ., data=oversampled_train, model="glm")
+predict(object, newdata, type = "link", ...)
+```
 
 
 ```{r assumptions - Multicollinearity}
