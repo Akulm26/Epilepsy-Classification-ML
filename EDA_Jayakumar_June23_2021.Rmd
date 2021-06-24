@@ -353,7 +353,7 @@ vif(glm.fit,  data = df)
 ```
 
 ```{r Ridge regression}
-x <- model.matrix(y ~ . -X, data = df)[,-1]
+x <- model.matrix(y ~ ., data = df)[,-1]
 y <- df$y
 ridge <- glmnet(x, y, alpha = 0, family = "binomial")
 plot(ridge)
@@ -362,7 +362,7 @@ coef(ridge)
 ```
 
 ```{r PCA - we dont have to use this}
-pcr <- pcr(y ~ .-X, data = df, scale = T)
+pcr <- pcr(y ~ ., data = df, scale = T)
 ?pcr
 summary(pcr)
 validationplot(pcr, val.type = "RMSEP")
