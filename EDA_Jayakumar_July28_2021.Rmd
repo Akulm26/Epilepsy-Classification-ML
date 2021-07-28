@@ -1,0 +1,758 @@
+---
+title: "Independent Research - Epilepsy"
+author: "Sobanaa Jayakumar"
+date: "6/16/2021"
+output: html_document
+---
+
+```{r libraries}
+library(corrplot)
+library(tidyverse)
+library(imbalance)
+library(ROSE)
+library(klaR) 
+library(car)
+library(glmnet)
+library(pls)
+library(ROCR)
+library(FNN)
+library(class)
+library(tree)
+library(randomForest)
+library(sgd)
+library(naivebayes)
+library(dplyr)
+library(ggplot2)
+```
+
+
+```{r data loading}
+df = read.csv("data.csv", header = T)
+head(df)
+# Dropping hashed Id column
+df <- subset(df, select = -c(X))
+df[, -179] <- scale(df[, -179])
+head(df)
+
+```
+
+
+```{r summary stats}
+#summary(df) - remove the hashtag for displaying summary stats 
+```
+
+
+```{r corrplot - NO CORRPLOT IS REQUIRED - SEE PYTHON SCRIPT}
+corr_matrix = df[,2:179]
+#corr_matrix
+M <- cor(corr_matrix)
+M
+
+```
+
+
+
+```{r NO CORRELATION OS REQUIRED - SEE PYTHON SCRIPT}
+# corr_simple <- function(data = corr_matrix,sig= 0.1){
+#   #convert data to numeric in order to run correlations
+#   #convert to factor first to keep the integrity of the data - each value will become a number rather than turn into NA
+#   df_cor <- data %>% mutate_if(is.character, as.factor)
+#   df_cor <- df_cor %>% mutate_if(is.factor, as.numeric)
+#   #run a correlation and drop the insignificant ones
+#   corr <- cor(df_cor)
+#   #prepare to drop duplicates and correlations of 1     
+#   corr[lower.tri(corr,diag=TRUE)] <- NA 
+#   #drop perfect correlations
+#   corr[corr == 1] <- NA 
+#   #turn into a 3-column table
+#   corr <- as.data.frame(as.table(corr))
+#   #remove the NA values from above 
+#   corr <- na.omit(corr) 
+#   #select significant values  
+#   corr <- subset(corr, abs(Freq) > sig) 
+#   #sort by highest correlation
+#   corr <- corr[order(-abs(corr$Freq)),] 
+#   #print table
+#   print(corr)
+#   #turn corr back into matrix in order to plot with corrplot
+#   mtx_corr <- reshape2::acast(corr, Var1~Var2, value.var="Freq")
+#   
+#   #plot correlations visually
+#   #corrplot(mtx_corr, is.corr=FALSE, tl.col="black", na.label=" ")
+# }
+# corr_simple()
+
+
+```
+
+
+```{r Data Pre Preprocessing and Splitting}
+# Conversion to binary
+class(df$y)
+df$y <- as.numeric(df$y)
+class(df$y)
+df <-  df %>% mutate(y = ifelse(y  < 2, 1, 0))
+#df <- lapply(df,as.numeric)
+df$y <- as.factor(df$y)
+class(df$y)
+head(df)
+```
+
+
+```{r Prevalence calculation}
+#Prevalence calculation
+#It is defined as the the percentage of samples belonging to the positive class. This means that, in our case, the prevalence value will depict the percentage of patients experiencing seizure. 
+
+class(df$y)
+y<-as.integer(df$y)
+y<-y-1
+sum(y)
+length(y)
+
+prevalence_calc<-function(df,y){
+  y<-as.integer(df$y)
+  y<-y-1
+  sum(y)
+  length(y)
+  X = sum(y)/length(y)
+  return(X)
+
+}
+prevalence_calc(df, y)
+
+#Separating response from independent variables
+
+input_df<-subset(df, select=X1:X178)
+input_df <- scale(input_df)
+head(input_df)
+output_df<-subset(df, select = y)
+head(output_df)
+
+#Random shuffling of the original data
+set.seed(1)
+rows<-sample(nrow(df))
+df_shuffled<-df[rows,]
+df_shuffled
+
+
+
+#Splitting data into train,test and validation
+
+spec = c(train = .7, test = .15, validate = .15)
+
+g = sample(cut(
+  seq(nrow(df_shuffled)), 
+  nrow(df_shuffled)*cumsum(c(0,spec)),
+  labels = names(spec)
+))
+
+res = split(df_shuffled, g)
+sapply(res, nrow)/nrow(df_shuffled)
+# res$train
+# res$test
+# res$validate
+
+prevalence_calc(res$train, y)
+prevalence_calc(res$test, y)
+prevalence_calc(res$validate, y)
+
+#Encountering class imbalance issue
+
+#oversampling in training data
+#library ROSE and imbalance
+#res$train[1:178] <- lapply(res$train[1:178], as.numeric)
+train<-res$train
+table(train$y)
+prop.table(table(train$y))
+n_legit<-6452
+new_frac_legit<-0.50
+new_n_total<- n_legit/new_frac_legit
+
+oversampling_train_result<-ovun.sample(y~., data = train, method = "over", N = new_n_total, seed = 2018)
+oversampled_train<-oversampling_train_result$data
+table(oversampled_train$y)
+prevalence_calc(oversampled_train,y)
+dim(oversampled_train)
+
+#Oversampling in test data
+test<-res$test
+table(test$y)
+prop.table(table(test$y))
+n_legit<-1348
+new_frac_legit<-0.50
+new_n_total<- n_legit/new_frac_legit
+
+oversampling_test_result<-ovun.sample(y~., data = test, method = "over", N = new_n_total, seed = 2018)
+oversampled_test<-oversampling_test_result$data
+table(oversampled_test$y)
+prevalence_calc(oversampled_test,y)
+dim(oversampled_test)
+
+
+#Oversampling in validate data
+
+validate<-res$validate
+table(validate$y)
+prop.table(table(validate$y))
+n_legit<-1400
+new_frac_legit<-0.50
+new_n_total<- n_legit/new_frac_legit
+
+oversampling_validate_result<-ovun.sample(y~., data = validate, method = "over", N = new_n_total, seed = 2018)
+oversampled_validate<-oversampling_validate_result$data
+table(oversampled_validate$y)
+prevalence_calc(oversampled_validate,y)
+dim(oversampled_validate)
+
+```
+
+We'll have to segregate train into x_train and y_train and like this for other sets too i.e. test and validate. Post splitting, we need to standardize our feature inputs for removing high variance in data. ONce this is done, we're ready to deploy our classification algos. 
+
+Multicollinearity: We cant remove features! There's no point checking since no frame readings can be removed.  
+
+```{r train test and validate}
+dim(oversampled_train)
+table(oversampled_train$y)
+dim(oversampled_test)
+table(oversampled_test$y)
+dim(oversampled_validate)
+table(oversampled_validate$y)
+```
+
+
+
+```{r logistic regression}
+#glm on train data
+epi.fit.train <- glm(y ~ ., family = binomial(link =  "logit"), data = oversampled_train)
+#predicting prob with test data
+epi.probs.validate <- predict(epi.fit.train, oversampled_validate, type = "response")
+head(epi.probs.validate)
+thresh <- 0.5
+#converting prob to classification with 0.5 threshold
+epi.pred.validate <- ifelse(epi.probs.validate > thresh, 1, 0)
+#Cross tab predicted Vs Actual
+conf.mat <- table("Predicted" = epi.pred.validate, "Actual" = oversampled_validate$y)
+colnames(conf.mat) <- c("No", "Yes")
+rownames(conf.mat) <- c("No", "Yes")
+conf.mat
+
+#Fit Statistics
+TruN <- conf.mat[1,1]
+TruP <- conf.mat[2,2]
+FalN <- conf.mat[1,2]
+FalP <- conf.mat[2,1]
+TotN <- TruN + FalP
+TotP <- TruP + FalN
+Tot <- TotN + TotP
+Tot
+Accuracy.Rate <- (TruN + TruP) / Tot
+Error.Rate <- (FalN + FalP)/ Tot
+Sensitivity <- TruP / TotP
+Specificity <- TruN / TotN
+FalsePositive.Rate <- 1-Specificity
+Rates.50 <- c(Accuracy.Rate, Error.Rate, Sensitivity, Specificity, FalsePositive.Rate)
+names(Rates.50) <- c("Accuracy Rate", "Error Rate", "Sensitivity", "Specificity", "False Positive Rate")
+print(Rates.50, digits =2)
+#Library ROCR for ROC and AUC
+
+#Creating a prediction object
+prediction <- prediction(epi.probs.validate, oversampled_validate$y)
+#ROC - it was 61% with test; now its 54% only with CV data
+performance <- performance(prediction, "tpr", "fpr")
+plot(performance, colorize = T)
+#AUC - 
+auc <- performance(prediction, "auc")
+auc.name <- auc@y.name[[1]]
+auc.value <- round(auc@y.values[[1]], digits = 3)
+paste(auc.name, "is", auc.value)
+```
+
+```{r KNN}
+#using library FNN and class
+#splitting by dep and indep variable for knn
+class(df$X150)
+oversampled_train_input <- oversampled_train[, -179]
+oversampled_train_output <- oversampled_train[, 179]
+oversampled_test_input <- oversampled_test[, -179]
+oversampled_test_output <- oversampled_test[, 179]
+oversampled_validate_input <- oversampled_validate[, -179]
+oversampled_validate_output <- oversampled_validate[, 179]
+
+#KNN
+#Error - x must be converted to dataframe
+epi.knn <- knn.reg(oversampled_train_input, oversampled_validate_input, oversampled_train_output, k = 3)
+(mean((epi.knn$pred - oversampled_validate_output)^2))^0.5
+```
+```{r Decision trees}
+#library tree 
+epi.tree.train <- tree(y ~ ., data = oversampled_train)
+epi.tree.pred.class <- predict(epi.tree.train, oversampled_validate, type = "class") #class = vector for probability
+confmat <- table(epi.tree.pred.class, oversampled_validate$y)
+confmat
+
+#Fit statistics
+TruN <- confmat[1,1]
+TruP <- confmat[2,2]
+FalN <- confmat[1,2]
+FalP <- confmat[2,1]
+TotN <- TruN + FalP
+TotP <- TruP + FalN
+Tot <- TotN + TotP
+Tot
+Accuracy.Rate <- (TruN + TruP) / Tot
+Error.Rate <- (FalN + FalP)/ Tot
+Sensitivity <- TruP / TotP
+Specificity <- TruN / TotN
+FalsePositive.Rate <- 1-Specificity
+Tree.Rates.50 <- c(Accuracy.Rate, Error.Rate, Sensitivity, Specificity, FalsePositive.Rate)
+names(Tree.Rates.50) <- c("Accuracy Rate", "Error Rate", "Sensitivity", "Specificity", "False Positive Rate")
+print(Tree.Rates.50, digits =2)
+#Tree plot
+plot(epi.tree.train)
+text(epi.tree.train, pretty=0)
+#ROC and AUC - wow AUC is 95.4%!!!
+epi.tree.pred.prob <- predict(epi.tree.train, oversampled_validate)
+head(epi.tree.pred.prob)
+pred <- prediction(epi.tree.pred.prob[, 2], oversampled_validate$y)
+epi.tree.pred.prob
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize = T)
+auc <- performance(pred, "auc")
+auc.name <- auc@y.name[[1]]
+auc.value <- round(auc@y.values[[1]], digits = 3)
+paste(auc.name, auc.value)
+
+```
+
+
+
+
+```{r Bagging}
+#using library randomforest. Did to compare this with RF and see the decrease in MSE
+bag.epi.train <- randomForest(y ~., data = oversampled_train, mtry = 178, importance = T)
+plot(bag.epi.train)
+bag.epi.train
+varImpPlot(bag.epi.train)
+importance(bag.epi.train)
+
+
+bag.tree.pred.class <- predict(bag.epi.train, oversampled_validate, type = "class") #class = vector for probability
+confmat <- table(bag.tree.pred.class, oversampled_validate$y)
+confmat
+
+#Fit statistics
+TruN <- confmat[1,1]
+TruP <- confmat[2,2]
+FalN <- confmat[1,2]
+FalP <- confmat[2,1]
+TotN <- TruN + FalP
+TotP <- TruP + FalN
+Tot <- TotN + TotP
+Tot
+Accuracy.Rate <- (TruN + TruP) / Tot
+Error.Rate <- (FalN + FalP)/ Tot
+Sensitivity <- TruP / TotP
+Specificity <- TruN / TotN
+FalsePositive.Rate <- 1-Specificity
+Tree.Bag.Rates.50 <- c(Accuracy.Rate, Error.Rate, Sensitivity, Specificity, FalsePositive.Rate)
+names(Tree.Bag.Rates.50) <- c("Accuracy Rate", "Error Rate", "Sensitivity", "Specificity", "False Positive Rate")
+print(Tree.Bag.Rates.50, digits =2)
+
+#ROC and AUC 
+epi.bag.pred.prob <- predict(bag.epi.train, oversampled_validate, head = "prob")
+pred <- prediction(epi.bag.pred.prob[,2], oversampled_validate$y) 
+class(oversampled_validate$y)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize = T)
+auc <- performance(pred, "auc")
+auc.name <- auc@y.name[[1]]
+auc.value <- round(auc@y.values[[1]], digits = 3)
+paste(auc.name, auc.value)
+```
+
+
+
+
+```{r Random forest}
+#using library randomforest
+rf.epi.train <- randomForest(y ~., data = oversampled_train, mtry = 13, importance = T)
+plot(rf.epi.train)
+rf.epi.train
+varImpPlot(rf.epi.train)
+importance(rf.epi.train)
+
+
+rf.tree.pred.class <- predict(rf.epi.train, oversampled_validate, type = "class") #class = vector for probability
+rf.tree.pred.class
+confmat <- table(rf.tree.pred.class, oversampled_validate$y)
+confmat
+
+#Fit statistics
+TruN <- confmat[1,1]
+TruP <- confmat[2,2]
+FalN <- confmat[1,2]
+FalP <- confmat[2,1]
+TotN <- TruN + FalP
+TotP <- TruP + FalN
+Tot <- TotN + TotP
+Tot
+Accuracy.Rate <- (TruN + TruP) / Tot
+Error.Rate <- (FalN + FalP)/ Tot
+Sensitivity <- TruP / TotP
+Specificity <- TruN / TotN
+FalsePositive.Rate <- 1-Specificity
+Tree.rf.Rates.50 <- c(Accuracy.Rate, Error.Rate, Sensitivity, Specificity, FalsePositive.Rate)
+names(Tree.rf.Rates.50) <- c("Accuracy Rate", "Error Rate", "Sensitivity", "Specificity", "False Positive Rate")
+print(Tree.rf.Rates.50, digits =2)
+
+#ROC and AUC 
+epi.rf.pred.prob <- predict(rf.epi.train, oversampled_validate, type = "prob")
+pred <- prediction(epi.rf.pred.prob[,2], oversampled_validate$y) 
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize = T)
+auc <- performance(pred, "auc")
+auc.name <- auc@y.name[[1]]
+auc.value <- round(auc@y.values[[1]], digits = 3)
+paste(auc.name, auc.value)
+```
+`
+
+``
+```{r SGD}
+#using library sgd. Figuring this out!!
+# Dimensions
+dim(df)
+N <- 11500  
+d <- 179  
+
+# Generate data.
+X <- matrix(rnorm(N*d), ncol=d)
+theta <- rep(5, d+1)
+eps <- rnorm(N)
+y <- cbind(1, X) %*% theta + eps
+dat <- data.frame(y=y, x=X)
+
+sgd.theta <- sgd(y ~ ., data=oversampled_train, model="glm")
+predict(object, newdata, type = "link", ...)
+
+
+#another method
+set.seed(42)
+N <- 11500
+d <- 179
+X <- matrix(rnorm(N*d), ncol=d)
+theta <- rep(5, d+1)
+eps <- rnorm(N)
+y <- cbind(1, X) %*% theta + eps
+dat <- data.frame(y=df$y, x=X)
+sgd.theta <- sgd(y ~ ., data=dat, model="glm")
+sprintf("Mean squared error: %0.3f", mean((theta - as.numeric(sgd.theta$coefficients))^2))
+
+
+#line 174 --- https://github.com/airoldilab/sgd/commit/0e5270f5d300d8d206e6d6fd83d0a214ee630c7d 
+
+set.seed(42)
+df$y <- as.factor(df$y) # transform to binary
+sgd.theta <- sgd(y ~ ., data=oversampled_train,model="glm", model.control=binomial(link="logit"), sgd.control=list(reltol=1e-5, npasses=200),lr.control=c(scale=1, gamma=1, alpha=30, c=1))
+
+#https://www.ocf.berkeley.edu/~janastas/stochastic-gradient-descent-in-r.html - this is GD from scratch without any package
+```
+
+
+```{r knn}
+knn.5<-knn(train = oversampled_train, test = oversampled_validate, cl = oversampled_train$y, k = 5)
+Acc.5<-100*sum(oversampled_validate$y==knn.5)/NROW(oversampled_validate$y)
+Acc.5
+### Confusion Matrix
+table(knn.5, oversampled_validate$y)
+library(caret)
+confusionMatrix(knn.5, oversampled_validate$y)
+#Hyperparameter Tuning - KNN (Optimal value of K)
+i=1                          # declaration to initiate for loop
+k.optm=1                     # declaration to initiate for loop
+for (i in 1:28){ 
+    knn.mod <-  knn(train=oversampled_train, test=oversampled_test, cl=oversampled_train$y, k=i)
+    k.optm[i] <- 100 * sum(oversampled_test$y == knn.mod)/NROW(oversampled_test$y)
+    k=i  
+    cat(k,'=',k.optm[i],'\n')       # to print % accuracy 
+}
+# Choose best k wrt validation data
+i=1                          # declaration to initiate for loop
+k.optm=1                     # declaration to initiate for loop
+for (i in 1:28){ 
+    knn.mod <-  knn(train=oversampled_train, test=oversampled_validate, cl=oversampled_train$y, k=i)
+    k.optm[i] <- 100 * sum(oversampled_validate$y == knn.mod)/NROW(oversampled_validate$y)
+    k=i  
+    cat(k,'=',k.optm[i],'\n')       # to print % accuracy 
+}
+#optimal value of k = 5
+```
+
+
+```{r NAIVE BAYES}
+library(naivebayes)
+library(dplyr)
+library(ggplot2)
+library(caret)
+model <- naive_bayes(y ~ ., data = oversampled_train, usekernel = T) 
+#model
+y_pred <- predict(model, newdata = oversampled_validate)
+cm <- table(oversampled_validate$y, y_pred)
+cm
+confusionMatrix(cm)
+```
+
+
+
+```{r ANN}
+library(neuralnet)
+heart.nnet.1 <- neuralnet(y ~., data = oversampled_train, hidden = 1, threshold = 0.01, act.fct = "logistic")
+plot(heart.nnet.1)
+# Predicting
+
+# Compute predictions as probabilities
+pred.prob <- predict(heart.nnet.1, oversampled_validate, type = "class") 
+
+# Convert probabilities to classifications
+
+thresh <- 0.5 # Set the classification threshold
+pred.prob.class <- ifelse(pred.prob > thresh, 1, 0) 
+pred.prob.class
+
+## Confusion Matrix
+confmat <- table("Predicted" = pred.prob.class[,2], "Actual" = oversampled_validate$y) 
+confmat # Display matrix
+
+# Compute fit stats
+
+TruN <- confmat[1,1] # True negatives
+TruP <- confmat[2,2] # True positives
+FalN <- confmat[1,2] # False negatives
+FalP <- confmat[2,1] # False positives
+TotN <- TruN + FalP # Total negatives
+TotP <- TruP + FalN # Total positives
+Tot <- TotN + TotP # Total
+
+paste(TruN, TruP, FalN, FalP, TotN, TotP, Tot) # To double check the computations
+
+# Now let's use these to compute accuracy and error rates
+
+Accuracy.Rate <- (TruN + TruP) / Tot
+Accuracy.Rate # 69.28
+
+Error.Rate <- (FalN + FalP) / Tot
+Error.Rate # Check it out
+
+# Sensitivity -- rate of correct positives
+
+Sensitivity <- TruP / TotP # Proportion of correct positives
+Sensitivity # Check it out
+
+# Specificity -- rate of correct negatives
+
+Specificity <- TruN / TotN # Proportion of correct negatives
+Specificity
+
+# False Positive Rate = 1 - specificity (useful for ROC curves)
+
+FalP.Rate <- 1 - Specificity
+FalP.Rate
+
+nnet.rates.50 <- round(c(Accuracy.Rate, Error.Rate, 
+                   Sensitivity, Specificity, FalP.Rate), digits = 3)
+
+names(nnet.rates.50) <- c("Accuracy", "Error", 
+                          "Sensitivity", "Specificity", "False Positives")
+
+nnet.rates.50
+
+
+## second
+heart.nnet.0.5 <- neuralnet(y ~., data = oversampled_train, hidden = 1, threshold = 0.5, act.fct = "logistic")
+plot(heart.nnet.0.5)
+# Predicting
+
+# Compute predictions as probabilities
+pred.prob <- predict(heart.nnet.0.5, oversampled_validate, type = "class") 
+
+# Convert probabilities to classifications
+
+thresh <- 0.5 # Set the classification threshold
+pred.prob.class <- ifelse(pred.prob > thresh, 1, 0) 
+
+## Confusion Matrix
+
+confmat <- table("Predicted" = pred.prob.class[,2], "Actual" = oversampled_validate$y) 
+confmat # Display matrix
+
+# Compute fit stats
+
+TruN <- confmat[1,1] # True negatives
+TruP <- confmat[2,2] # True positives
+FalN <- confmat[1,2] # False negatives
+FalP <- confmat[2,1] # False positives
+TotN <- TruN + FalP # Total negatives
+TotP <- TruP + FalN # Total positives
+Tot <- TotN + TotP # Total
+
+paste(TruN, TruP, FalN, FalP, TotN, TotP, Tot) # To double check the computations
+
+# Now let's use these to compute accuracy and error rates
+
+Accuracy.Rate <- (TruN + TruP) / Tot
+Accuracy.Rate #65.03
+
+
+## third
+heart.nnet.4.5 <- neuralnet(y ~., data = oversampled_train, hidden = 4, threshold = 0.5, act.fct = "logistic")
+plot(heart.nnet.4.5)
+# Predicting
+
+# Compute predictions as probabilities
+pred.prob <- predict(heart.nnet.4.5, oversampled_validate, type = "class") 
+
+# Convert probabilities to classifications
+
+thresh <- 0.5 # Set the classification threshold
+pred.prob.class <- ifelse(pred.prob > thresh, 1, 0) 
+
+
+## Confusion Matrix
+
+confmat <- table("Predicted" = pred.prob.class[,2], "Actual" = oversampled_validate$y) 
+confmat # Display matrix
+
+TruN <- confmat[1,1] # True negatives
+TruP <- confmat[2,2] # True positives
+FalN <- confmat[1,2] # False negatives
+FalP <- confmat[2,1] # False positives
+TotN <- TruN + FalP # Total negatives
+TotP <- TruP + FalN # Total positives
+Tot <- TotN + TotP # Total
+
+Accuracy.Rate <- (TruN + TruP) / Tot
+Accuracy.Rate #90.25
+
+#fourth
+heart.nnet.4.2 <- neuralnet(y ~., data = oversampled_train, hidden = c(4,2), threshold = 0.5, act.fct = "logistic")
+plot(heart.nnet.4.2)
+# Predicting
+
+# Compute predictions as probabilities
+pred.prob <- predict(heart.nnet.4.2, oversampled_validate, type = "class") 
+
+# Convert probabilities to classifications
+
+thresh <- 0.5 # Set the classification threshold
+pred.prob.class <- ifelse(pred.prob > thresh, 1, 0) 
+
+
+## Confusion Matrix
+
+confmat <- table("Predicted" = pred.prob.class[,2], "Actual" = oversampled_validate$y) 
+confmat # Display matrix
+
+TruN <- confmat[1,1] # True negatives
+TruP <- confmat[2,2] # True positives
+FalN <- confmat[1,2] # False negatives
+FalP <- confmat[2,1] # False positives
+TotN <- TruN + FalP # Total negatives
+TotP <- TruP + FalN # Total positives
+Tot <- TotN + TotP # Total
+
+Accuracy.Rate <- (TruN + TruP) / Tot
+Accuracy.Rate #90.57
+```
+
+
+```{r SVM linear kernel} 
+library(e1071)
+library(caret)
+s = svm(y~., data = oversampled_train, kernel = "linear")
+pred<-predict(s, oversampled_validate)
+confusionMatrix(oversampled_validate$y,pred)
+
+#{r SVM Polynomial kernel}
+s_poly = svm(y ~ ., data = oversampled_train, kernel = "polynomial")
+summary(s_poly)
+pred_poly<-predict(s_poly, oversampled_validate)
+confusionMatrix(oversampled_validate$y, pred_poly)
+
+#{r sigmoid kernel}
+s_sigmoid = svm(y ~ ., data = oversampled_train, kernel = "sigmoid")
+summary(s_sigmoid)
+pred_sigmoid<-predict(s_sigmoid, oversampled_validate)
+confusionMatrix(oversampled_validate$y, pred_sigmoid)
+
+#{r radial kernel}
+s_radial = svm(y ~ ., data = oversampled_train, kernel = "radial")
+summary(s_radial)
+pred_radial<-predict(s_radial, oversampled_validate)
+confusionMatrix(oversampled_validate$y, pred_radial)
+
+#{r SVM Hyperparameter tuning}
+Stuned<-tune(svm, y ~., data = oversampled_test, ranges = list(cost =10^seq(-3,3), kernel = c("sigmoid","radial", "polynomial", "linear")))
+summary(Stuned)
+
+#{r use SVM best parameters on validation data }
+S1<-svm(y ~ ., data = oversampled_train, cost = 10^seq(3), kernel = "radial")
+summary(S1)
+pred_S1<-predict(S1, oversampled_validate)
+confusionMatrix(oversampled_validate$y, pred_S1)
+```
+
+
+```{r GBM}
+library(caret)
+library(doParallel)
+grid <- expand.grid(n.trees = c(1000,1500), interaction.depth=c(1:3), shrinkage=c(0.01,0.05,0.1), n.minobsinnode=c(20))
+ctrl <- trainControl(method = "repeatedcv",number = 5, repeats = 2, allowParallel = T)
+registerDoParallel(detectCores()-1)
+set.seed(124) #for reproducability
+unwantedoutput <- capture.output(GBMModel <- train(y~.,data = oversampled_train,
+                  method = "gbm", trControl = ctrl, tuneGrid = grid))
+print(GBMModel)
+confusionMatrix(GBMModel)
+
+plot(GBMModel)
+
+varImp(object=GBMModel)
+#plot(varImp(object=GBMModel),main="GBM - Variable Importance")
+
+library(tidyverse)
+oversampled_validate_x<-oversampled_validate%>%select(-y)
+oversampled_validate_x
+predictions<-predict.train(object=GBMModel,oversampled_validate_x,type="raw")
+confusionMatrix(predictions,oversampled_validate$y)
+```
+
+
+
+```{r assumptions - Multicollinearity}
+#using library kLaR and car
+cond.index(glm.fit, data = df)
+vif(glm.fit,  data = df)
+```
+
+
+
+```{r Ridge regression}
+x <- model.matrix(y ~ ., data = df)[,-1]
+y <- df$y
+ridge <- glmnet(x, y, alpha = 0, family = "binomial")
+plot(ridge)
+print(ridge)
+coef(ridge)
+```
+
+
+
+```{r PCA - we dont have to use this}
+pcr <- pcr(y ~ ., data = df, scale = T)
+?pcr
+summary(pcr)
+validationplot(pcr, val.type = "RMSEP")
+?randomForest
+```
+
+
